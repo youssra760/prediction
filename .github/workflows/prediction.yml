@@ -1,29 +1,26 @@
-name: Prédiction quotidienne
+name: Prédiction quotidienne -> CSV sur Drive
 
 on:
   schedule:
-    - cron: '0 5 * * *'   # exécution chaque jour à 6h00 heure de Fès (UTC+1)
+    - cron: '0 6 * * *'  # 07h à Fès (UTC+1)
   workflow_dispatch:
 
 jobs:
   predict:
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v3
-
       - uses: actions/setup-python@v4
-        with:
-          python-version: '3.10'
-
-      - name: Installer les dépendances
-        run: |
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
-
+        with: python-version: '3.10'
+      - name: Installer dépendances
+        run: pip install --upgrade pip && pip install -r requirements.txt
       - name: Exécuter le script de prédiction
         env:
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
+          EXCEL_FILE_ID: ${{ secrets.EXCEL_FILE_ID }}
+          FOLDER_ID: ${{ secrets.FOLDER_ID }}
         run: python predict.py
