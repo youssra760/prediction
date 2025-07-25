@@ -24,4 +24,4 @@ jobs:
           REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
           EXCEL_FILE_ID: ${{ secrets.EXCEL_FILE_ID }}
           FOLDER_ID: ${{ secrets.FOLDER_ID }}
-        run: python predict.py
+        run: python prediction.py
