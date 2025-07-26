@@ -1,103 +1,134 @@
-import pandas as pd
-import numpy as np
 import os
-import requests
+import pandas as pd
 from sklearn.linear_model import LinearRegression
+from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+import numpy as np
 
-# 🔐 Secrets d'authentification
-CLIENT_ID = os.getenv("CLIENT_ID")
-CLIENT_SECRET = os.getenv("CLIENT_SECRET")
-REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
-# 📊 URL publique du Google Sheet
-csv_url = "https://docs.google.com/spreadsheets/d/18HmHLnT3fQrrV22zs_0bAym_VQZfG8zg/export?format=csv&gid=879814994"
+def train_model_for_symbol(df_symbol):
+    cols = ['open', 'high', 'low', 'close', 'volume']
+    for col in cols:
+        df_symbol[col] = df_symbol[col].astype(str).str.replace(',', '.').astype(float)
 
-def get_access_token():
-    """Échange le refresh token contre un access token"""
-    token_url = "https://oauth2.googleapis.com/token"
-    payload = {
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "refresh_token": REFRESH_TOKEN,
-        "grant_type": "refresh_token"
-    }
-    response = requests.post(token_url, data=payload)
-    response.raise_for_status()
-    return response.json()['access_token']
+    for col in ['open', 'high', 'low', 'volume']:
+        df_symbol[f'{col}_lag1'] = df_symbol[col].shift(1)
 
-def upload_to_drive(filename, access_token):
-    """Uploader le fichier Excel dans le Drive racine"""
-    headers = {
-        "Authorization": f"Bearer {access_token}"
-    }
+    df_symbol = df_symbol.dropna()
 
-    metadata = {
-        "name": filename,
-        "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-    }
+    X = df_symbol[['open_lag1', 'high_lag1', 'low_lag1', 'volume_lag1']]
+    y = df_symbol['close']
 
-    files = {
-        'data': ('metadata', str(metadata), 'application/json'),
-        'file': (filename, open(filename, "rb"), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
-    }
+    X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, shuffle=False)
 
-    upload_url = "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart"
-    response = requests.post(upload_url, headers=headers, files=files)
+    model = LinearRegression()
+    model.fit(X_train, y_train)
 
-    if response.status_code in [200, 201]:
-        print("✅ Fichier uploadé dans Google Drive.")
+    y_pred = model.predict(X_test)
+
+    mae = mean_absolute_error(y_test, y_pred)
+    mse = mean_squared_error(y_test, y_pred)
+    rmse = np.sqrt(mse)
+    r2 = r2_score(y_test, y_pred)
+
+    print(f"=== Résultats pour le symbole : {df_symbol['symbol'].iloc[0]} ===")
+    print(f"MAE : {mae:.2f}")
+    print(f"MSE : {mse:.2f}")
+    print(f"RMSE : {rmse:.2f}")
+    print(f"R² : {r2:.2f}")
+
+    print("\nComparaison des valeurs réelles / prédites :")
+    for true_val, pred_val in zip(y_test[:5], y_pred[:5]):
+        print(f"Vrai: {true_val:.2f} — Prédit: {pred_val:.2f}")
+
+    last_row = df_symbol.iloc[-1]
+    next_day_features = pd.DataFrame({
+        'open_lag1': [last_row['open']],
+        'high_lag1': [last_row['high']],
+        'low_lag1': [last_row['low']],
+        'volume_lag1': [last_row['volume']],
+    })
+
+    next_day_pred = model.predict(next_day_features)
+    print(f"\nPrédiction close pour le jour suivant : {next_day_pred[0]:.2f}\n")
+
+    results = pd.DataFrame({
+        'Actual': y_test.values,
+        'Predicted': y_pred
+    })
+    results['Symbol'] = df_symbol['symbol'].iloc[0]
+    results['MAE'] = mae
+    results['MSE'] = mse
+    results['RMSE'] = rmse
+    results['R2'] = r2
+
+    return results
+
+def upload_to_drive(filename, creds):
+    service = build("drive", "v3", credentials=creds)
+
+    # Recherche fichier avec ce nom à la racine (sans dossier)
+    query = f"name='{filename}' and trashed=false"
+    results = service.files().list(q=query, fields="files(id, name)").execute()
+    items = results.get('files', [])
+
+    media = MediaFileUpload(filename, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    if items:
+        file_id = items[0]['id']
+        updated_file = service.files().update(
+            fileId=file_id,
+            media_body=media
+        ).execute()
+        print(f"Fichier mis à jour sur Google Drive (ID: {file_id})")
     else:
-        print("❌ Échec de l'upload :", response.text)
+        file_metadata = {
+            "name": filename,
+            "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        }
+
+        uploaded_file = service.files().create(
+            body=file_metadata,
+            media_body=media
+        ).execute()
+        print(f"Nouveau fichier créé sur Google Drive (ID: {uploaded_file.get('id')})")
 
 def main():
-    # Étape 1 : Charger les données depuis le Google Sheets
-    df = pd.read_csv(csv_url)
-    print(f"✅ Données chargées. Nombre de lignes : {len(df)}")
+    url = "https://docs.google.com/spreadsheets/d/18HmHLnT3fQrrV22zs_0bAym_VQZfG8zg/export?format=csv&gid=1356640539"
+    df = pd.read_csv(url)
 
-    # Étape 2 : Vérification des colonnes
-    required_cols = ['Open', 'High', 'Low', 'Close', 'Volume']
-    for col in required_cols:
-        if col not in df.columns:
-            raise ValueError(f"❌ Colonne manquante : {col}")
+    symbols = df['symbol'].unique()
+    all_results = pd.DataFrame()
 
-    df = df.dropna(subset=required_cols).reset_index(drop=True)
+    for symbol in symbols:
+        df_symbol = df[df['symbol'] == symbol].copy()
+        results = train_model_for_symbol(df_symbol)
+        all_results = pd.concat([all_results, results], ignore_index=True)
 
-    # Étape 3 : Modèle
-    X = df[['Open', 'High', 'Low', 'Volume']]
-    y = df['Close']
-    model = LinearRegression()
-    model.fit(X, y)
-    df['Close_Predicted'] = model.predict(X)
+    filename = 'predictions_results.xlsx'
+    all_results.to_excel(filename, index=False)
+    print(f"Résultats sauvegardés dans {filename}")
 
-    # Étape 4 : Prédiction du lendemain
-    last_row = df.iloc[-1]
-    next_day_features = np.array([[last_row['Open'], last_row['High'], last_row['Low'], last_row['Volume']]])
-    next_day_pred = model.predict(next_day_features)[0]
-    print(f"📈 Prédiction du prix de clôture du lendemain : {next_day_pred:.2f}")
+    CLIENT_ID = os.getenv('CLIENT_ID')
+    CLIENT_SECRET = os.getenv('CLIENT_SECRET')
+    REFRESH_TOKEN = os.getenv('REFRESH_TOKEN')
 
-    # Étape 5 : Métriques
-    df['Absolute_Error'] = np.abs(df['Close'] - df['Close_Predicted'])
-    df['Squared_Error'] = (df['Close'] - df['Close_Predicted']) ** 2
-    df['Percentage_Error'] = df['Absolute_Error'] / df['Close'] * 100
+    creds = Credentials(
+        None,
+        refresh_token=REFRESH_TOKEN,
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET,
+        token_uri="https://oauth2.googleapis.com/token"
+    )
 
-    mae = mean_absolute_error(y, df['Close_Predicted'])
-    rmse = np.sqrt(mean_squared_error(y, df['Close_Predicted']))
-    r2 = r2_score(y, df['Close_Predicted'])
+    if creds and creds.expired and creds.refresh_token:
+        creds.refresh(Request())
 
-    print(f"\n🔢 Métriques globales :")
-    print(f"MAE : {mae:.2f}")
-    print(f"RMSE : {rmse:.2f}")
-    print(f"R² : {r2:.4f}")
-
-    # Étape 6 : Enregistrer localement
-    filename = "result.xlsx"
-    df.to_excel(filename, index=False)
-    print("📁 Fichier enregistré localement.")
-
-    # Étape 7 : Upload Google Drive
-    access_token = get_access_token()
-    upload_to_drive(filename, access_token)
+    upload_to_drive(filename, creds)
 
 if __name__ == "__main__":
     main()
