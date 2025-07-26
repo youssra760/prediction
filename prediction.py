@@ -15,8 +15,11 @@ def train_model_for_symbol(df_symbol):
     for col in cols:
         df_symbol[col] = df_symbol[col].astype(str).str.replace(',', '.').astype(float)
 
-    for col in ['open', 'high', 'low', 'volume']:
-        df_symbol[f'{col}_lag1'] = df_symbol[col].shift(1)
+    # Création des variables décalées (lag)
+    df_symbol['open_lag1'] = df_symbol['open'].shift(1)
+    df_symbol['high_lag1'] = df_symbol['high'].shift(1)
+    df_symbol['low_lag1'] = df_symbol['low'].shift(1)
+    df_symbol['volume_lag1'] = df_symbol['volume'].shift(1)
 
     df_symbol = df_symbol.dropna()
 
@@ -35,16 +38,7 @@ def train_model_for_symbol(df_symbol):
     rmse = np.sqrt(mse)
     r2 = r2_score(y_test, y_pred)
 
-    print(f"=== Résultats pour le symbole : {df_symbol['symbol'].iloc[0]} ===")
-    print(f"MAE : {mae:.2f}")
-    print(f"MSE : {mse:.2f}")
-    print(f"RMSE : {rmse:.2f}")
-    print(f"R² : {r2:.2f}")
-
-    print("\nComparaison des valeurs réelles / prédites :")
-    for true_val, pred_val in zip(y_test[:5], y_pred[:5]):
-        print(f"Vrai: {true_val:.2f} — Prédit: {pred_val:.2f}")
-
+    # Prédiction du lendemain
     last_row = df_symbol.iloc[-1]
     next_day_features = pd.DataFrame({
         'open_lag1': [last_row['open']],
@@ -53,25 +47,34 @@ def train_model_for_symbol(df_symbol):
         'volume_lag1': [last_row['volume']],
     })
 
-    next_day_pred = model.predict(next_day_features)
-    print(f"\nPrédiction close pour le jour suivant : {next_day_pred[0]:.2f}\n")
+    next_day_pred = model.predict(next_day_features)[0]
 
+    # Résultats de test uniquement
     results = pd.DataFrame({
-        'Actual': y_test.values,
+        'Actual': y_test,
         'Predicted': y_pred
     })
+
     results['Symbol'] = df_symbol['symbol'].iloc[0]
-    results['MAE'] = mae
-    results['MSE'] = mse
-    results['RMSE'] = rmse
-    results['R2'] = r2
+
+    # Ajouter une seule ligne avec les métriques et la prédiction du jour suivant
+    summary_row = {
+        'Actual': None,
+        'Predicted': next_day_pred,
+        'Symbol': df_symbol['symbol'].iloc[0],
+        'MAE': mae,
+        'MSE': mse,
+        'RMSE': rmse,
+        'R2': r2
+    }
+
+    summary_df = pd.DataFrame([summary_row])
+    results = pd.concat([results, summary_df], ignore_index=True)
 
     return results
 
 def upload_to_drive(filename, creds):
     service = build("drive", "v3", credentials=creds)
-
-    # Recherche fichier avec ce nom à la racine (sans dossier)
     query = f"name='{filename}' and trashed=false"
     results = service.files().list(q=query, fields="files(id, name)").execute()
     items = results.get('files', [])
@@ -80,39 +83,31 @@ def upload_to_drive(filename, creds):
 
     if items:
         file_id = items[0]['id']
-        updated_file = service.files().update(
-            fileId=file_id,
-            media_body=media
-        ).execute()
-        print(f"Fichier mis à jour sur Google Drive (ID: {file_id})")
+        service.files().update(fileId=file_id, media_body=media).execute()
+        print(f"✅ Fichier mis à jour sur Google Drive (ID: {file_id})")
     else:
         file_metadata = {
             "name": filename,
             "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         }
-
-        uploaded_file = service.files().create(
-            body=file_metadata,
-            media_body=media
-        ).execute()
-        print(f"Nouveau fichier créé sur Google Drive (ID: {uploaded_file.get('id')})")
+        uploaded_file = service.files().create(body=file_metadata, media_body=media).execute()
+        print(f"✅ Nouveau fichier créé sur Google Drive (ID: {uploaded_file.get('id')})")
 
 def main():
     url = "https://docs.google.com/spreadsheets/d/18HmHLnT3fQrrV22zs_0bAym_VQZfG8zg/export?format=csv&gid=1356640539"
     df = pd.read_csv(url)
 
-    symbols = df['symbol'].unique()
     all_results = pd.DataFrame()
-
-    for symbol in symbols:
+    for symbol in df['symbol'].unique():
         df_symbol = df[df['symbol'] == symbol].copy()
-        results = train_model_for_symbol(df_symbol)
-        all_results = pd.concat([all_results, results], ignore_index=True)
+        result = train_model_for_symbol(df_symbol)
+        all_results = pd.concat([all_results, result], ignore_index=True)
 
     filename = 'predictions_results.xlsx'
     all_results.to_excel(filename, index=False)
-    print(f"Résultats sauvegardés dans {filename}")
+    print(f"📁 Résultats sauvegardés dans {filename}")
 
+    # Authentification Google Drive
     CLIENT_ID = os.getenv('CLIENT_ID')
     CLIENT_SECRET = os.getenv('CLIENT_SECRET')
     REFRESH_TOKEN = os.getenv('REFRESH_TOKEN')
