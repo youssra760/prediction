@@ -5,14 +5,14 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseDownload, MediaFileUpload
 
-# Lire les secrets depuis GitHub Actions
+# 🔐 Charger les secrets depuis GitHub Actions
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
-EXCEL_FILE_ID = os.getenv("EXCEL_FILE_ID")  # ID de ta Google Sheet
-FOLDER_ID = os.getenv("FOLDER_ID")          # ID du dossier cible Drive
+SHEET_ID = os.getenv("EXCEL_FILE_ID")  # ID Google Sheet
+FOLDER_ID = os.getenv("FOLDER_ID")     # ID dossier Drive cible
 
-# 1. Rafraîchissement du token
+# 1. Rafraîchir le token OAuth
 resp = requests.post(
     "https://oauth2.googleapis.com/token",
     data={
@@ -26,21 +26,21 @@ resp.raise_for_status()
 creds = Credentials(token=resp.json()["access_token"])
 service = build("drive", "v3", credentials=creds)
 
-# 2. Vérifier l'accès à la feuille
+# 2. Vérification d'accès sécurisé (pour Shared Drives)
 try:
     meta = service.files().get(
-        fileId=EXCEL_FILE_ID,
+        fileId=SHEET_ID,
         fields="id,name,mimeType",
         supportsAllDrives=True
     ).execute()
-    print("Accès confirmé :", meta.get("name"), "(", meta.get("mimeType"), ")")
+    print("✅ Accès validé :", meta["name"], "(", meta["mimeType"], ")")
 except Exception as e:
-    print("Erreur accès au fichier :", e)
+    print("❌ Accès impossible :", e)
     exit(1)
 
-# 3. Export de la Google Sheet (en XLSX)
+# 3. Export de la Google Sheet en fichier Excel
 request = service.files().export_media(
-    fileId=EXCEL_FILE_ID,
+    fileId=SHEET_ID,
     mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
 fh = io.BytesIO()
@@ -50,22 +50,23 @@ while not done:
     _, done = downloader.next_chunk()
 fh.seek(0)
 
-# 4. Lire les données
+# 4. Traitement des données
 df = pd.read_excel(fh).dropna()
 X = df[['Open', 'High', 'Low', 'Close', 'Volume']]
 y = df['Close_tmr']
 
-# 5. Modèle de régression linéaire
 model = LinearRegression().fit(X, y)
-pred = float(model.predict(X.iloc[-1].values.reshape(1, -1))[0])
+pred_value = float(model.predict(X.iloc[-1].values.reshape(1, -1))[0])
 
-# 6. Générer le fichier CSV
+# 5. Génération du fichier CSV avec prédiction
 csv_filename = "prediction.csv"
-pd.DataFrame([{'date': pd.Timestamp.today().date().isoformat(),
-               'prediction_close': pred}]).to_csv(csv_filename, index=False)
-print("✔ CSV généré :", csv_filename)
+pd.DataFrame([{
+    'date': pd.Timestamp.today().date().isoformat(),
+    'prediction_close': pred_value
+}]).to_csv(csv_filename, index=False)
+print("✔ Fichier CSV généré :", csv_filename)
 
-# 7. Upload vers Drive (même pour Shared Drive)
+# 6. Upload vers le dossier Drive cible
 file_metadata = {
     'name': csv_filename,
     'parents': [FOLDER_ID],
