@@ -1,30 +1,15 @@
+import os
 import pandas as pd
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import numpy as np
-import gspread
-from oauth2client.service_account import ServiceAccountCredentials
 
-# === Connexion à Google Sheets
-scope = ["https://spreadsheets.google.com/feeds", "https://www.googleapis.com/auth/drive"]
-credentials = ServiceAccountCredentials.from_json_keyfile_name("credentials.json", scope)
-gc = gspread.authorize(credentials)
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
-# Remplacer par ton ID Google Sheets
-sheet_url = "https://docs.google.com/spreadsheets/d/1zet2MRDEotTpDpW5zPCaXHoljBTSKUYDnx7ICNXsHEI/edit?usp=sharing"
-spreadsheet = gc.open_by_url(sheet_url)
-worksheet = spreadsheet.get_worksheet(0)  # 0 = première feuille
-
-# Charger les données en DataFrame
-data = worksheet.get_all_records()
-df = pd.DataFrame(data)
-
-# === Ajouter une colonne symbol si elle n’existe pas
-if 'symbol' not in df.columns:
-    df['symbol'] = 'Bourse'
-
-# === Lancer le modèle
 def train_model_for_symbol(df_symbol):
     cols = ['open', 'high', 'low', 'close', 'volume']
     for col in cols:
@@ -81,6 +66,7 @@ def train_model_for_symbol(df_symbol):
     results['RMSE'] = rmse
     results['R2'] = r2
 
+    # Ajout de la prédiction du jour suivant
     next_day = pd.to_datetime(df_symbol['date'].max()) + pd.Timedelta(days=1)
     next_day_row = pd.DataFrame({
         'Actual': [np.nan],
@@ -96,5 +82,67 @@ def train_model_for_symbol(df_symbol):
 
     return results
 
-# === Exécution
-train_model_for_symbol(df)
+def upload_to_drive(filename, creds):
+    service = build("drive", "v3", credentials=creds)
+
+    # Recherche fichier avec ce nom à la racine (sans dossier)
+    query = f"name='{filename}' and trashed=false"
+    results = service.files().list(q=query, fields="files(id, name)").execute()
+    items = results.get('files', [])
+
+    media = MediaFileUpload(filename, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+
+    if items:
+        file_id = items[0]['id']
+        updated_file = service.files().update(
+            fileId=file_id,
+            media_body=media
+        ).execute()
+        print(f"Fichier mis à jour sur Google Drive (ID: {file_id})")
+    else:
+        file_metadata = {
+            "name": filename,
+            "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        }
+        uploaded_file = service.files().create(
+            body=file_metadata,
+            media_body=media
+        ).execute()
+        print(f"Nouveau fichier créé sur Google Drive (ID: {uploaded_file.get('id')})")
+
+def main():
+    # Remplace ici par le lien public export CSV de ta Google Sheet
+    url = "https://docs.google.com/spreadsheets/d/1zet2MRDEotTpDpW5zPCaXHoljBTSKUYDnx7ICNXsHEI/export?format=csv&gid=990018493"
+    df = pd.read_csv(url)
+
+    symbols = df['symbol'].unique()
+    all_results = pd.DataFrame()
+
+    for symbol in symbols:
+        df_symbol = df[df['symbol'] == symbol].copy()
+        results = train_model_for_symbol(df_symbol)
+        all_results = pd.concat([all_results, results], ignore_index=True)
+
+    filename = "bourses.xlsx"
+    all_results.to_excel(filename, index=False)
+    print(f"Résultats sauvegardés dans {filename}")
+
+    CLIENT_ID = os.getenv('CLIENT_ID')
+    CLIENT_SECRET = os.getenv('CLIENT_SECRET')
+    REFRESH_TOKEN = os.getenv('REFRESH_TOKEN')
+
+    creds = Credentials(
+        None,
+        refresh_token=REFRESH_TOKEN,
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET,
+        token_uri="https://oauth2.googleapis.com/token"
+    )
+
+    if creds and creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+
+    upload_to_drive(filename, creds)
+
+if __name__ == "__main__":
+    main()
