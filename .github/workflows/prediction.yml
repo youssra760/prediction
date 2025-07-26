@@ -10,13 +10,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+
       - uses: actions/setup-python@v4
         with:
           python-version: '3.10'
+
       - name: Installer dépendances
         run: |
           pip install --upgrade pip
           pip install -r requirements.txt
+
       - name: Exécuter le script de prédiction
         env:
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
@@ -24,4 +27,10 @@ jobs:
           REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
           EXCEL_FILE_ID: ${{ secrets.EXCEL_FILE_ID }}
           FOLDER_ID: ${{ secrets.FOLDER_ID }}
+
+          # Variables email pour envoi
+          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
+          SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
+          RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
+
         run: python prediction.py
