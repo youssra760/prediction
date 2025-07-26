@@ -12,6 +12,7 @@ def train_model_for_symbol(df_symbol):
     for col in cols:
         df_symbol[col] = df_symbol[col].astype(str).str.replace(',', '.').astype(float)
 
+    # Création des variables lag1
     for col in ['open', 'high', 'low', 'volume']:
         df_symbol[f'{col}_lag1'] = df_symbol[col].shift(1)
 
@@ -27,6 +28,7 @@ def train_model_for_symbol(df_symbol):
 
     y_pred = model.predict(X_test)
 
+    # Calcul des métriques
     mae = mean_absolute_error(y_test, y_pred)
     mse = mean_squared_error(y_test, y_pred)
     rmse = np.sqrt(mse)
@@ -53,6 +55,7 @@ def train_model_for_symbol(df_symbol):
     next_day_pred = model.predict(next_day_features)
     print(f"\nPrédiction close pour le jour suivant : {next_day_pred[0]:.2f}\n")
 
+    # Préparer dataframe résultats à retourner
     results = pd.DataFrame({
         'Actual': y_test.values,
         'Predicted': y_pred
@@ -100,13 +103,13 @@ def main():
     all_results.to_excel(filename, index=False)
     print(f"Résultats sauvegardés dans {filename}")
 
-    # Récupérer infos mail depuis variables d'environnement
+    # Récupération infos mail depuis variables d'environnement (ex: secrets GitHub, variables locales)
     sender_email = os.getenv('SENDER_EMAIL')
-    sender_password = os.getenv('SENDER_PASSWORD')  # ton mot de passe stocké en secret
+    sender_password = os.getenv('SENDER_PASSWORD')
     receiver_email = os.getenv('RECEIVER_EMAIL')
 
     if not sender_email or not sender_password or not receiver_email:
-        raise ValueError("Les variables d'environnement SENDER_EMAIL, SENDER_PASSWORD, RECEIVER_EMAIL doivent être définies.")
+        raise ValueError("Les variables d'environnement SENDER_EMAIL, SENDER_PASSWORD et RECEIVER_EMAIL doivent être définies.")
 
     subject = 'Résultats des prédictions'
     body = 'Bonjour,\n\nVeuillez trouver en pièce jointe le fichier Excel contenant les résultats des prédictions.\n\nCordialement.'
@@ -115,4 +118,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
