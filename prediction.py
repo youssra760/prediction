@@ -68,11 +68,11 @@ def train_model_for_symbol(df_symbol):
 
     return results
 
-def upload_to_drive(filename, folder_id, creds):
+def upload_to_drive(filename, creds):
     service = build("drive", "v3", credentials=creds)
 
-    # Chercher fichier avec ce nom dans le dossier
-    query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
+    # Recherche fichier avec ce nom à la racine (sans dossier)
+    query = f"name='{filename}' and trashed=false"
     results = service.files().list(q=query, fields="files(id, name)").execute()
     items = results.get('files', [])
 
@@ -88,14 +88,14 @@ def upload_to_drive(filename, folder_id, creds):
     else:
         file_metadata = {
             "name": filename,
-            "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            "parents": [folder_id]
+            "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         }
+
         uploaded_file = service.files().create(
             body=file_metadata,
             media_body=media
         ).execute()
-        print(f"Nouveau fichier créé sur Google Drive dans le dossier (ID: {uploaded_file.get('id')})")
+        print(f"Nouveau fichier créé sur Google Drive (ID: {uploaded_file.get('id')})")
 
 def main():
     url = "https://docs.google.com/spreadsheets/d/18HmHLnT3fQrrV22zs_0bAym_VQZfG8zg/export?format=csv&gid=1356640539"
@@ -116,7 +116,6 @@ def main():
     CLIENT_ID = os.getenv('CLIENT_ID')
     CLIENT_SECRET = os.getenv('CLIENT_SECRET')
     REFRESH_TOKEN = os.getenv('REFRESH_TOKEN')
-    FOLDER_ID = os.getenv('FOLDER_ID')
 
     creds = Credentials(
         None,
@@ -129,8 +128,7 @@ def main():
     if creds and creds.expired and creds.refresh_token:
         creds.refresh(Request())
 
-    upload_to_drive(filename, FOLDER_ID, creds)
+    upload_to_drive(filename, creds)
 
 if __name__ == "__main__":
     main()
-
