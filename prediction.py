@@ -94,7 +94,7 @@ def upload_to_drive(filename, creds):
 
     if items:
         file_id = items[0]['id']
-        updated_file = service.files().update(
+        service.files().update(
             fileId=file_id,
             media_body=media
         ).execute()
@@ -111,7 +111,7 @@ def upload_to_drive(filename, creds):
         print(f"Nouveau fichier créé sur Google Drive (ID: {uploaded_file.get('id')})")
 
 def main():
-    # Remplace ici par le lien public export CSV de ta Google Sheet
+    # Lien export CSV de ta Google Sheet
     url = "https://docs.google.com/spreadsheets/d/1zet2MRDEotTpDpW5zPCaXHoljBTSKUYDnx7ICNXsHEI/export?format=csv&gid=990018493"
     df = pd.read_csv(url)
 
@@ -123,7 +123,7 @@ def main():
         results = train_model_for_symbol(df_symbol)
         all_results = pd.concat([all_results, results], ignore_index=True)
 
-    filename = "bourses.xlsx"
+    filename = "predictions_results.xlsx"
     all_results.to_excel(filename, index=False)
     print(f"Résultats sauvegardés dans {filename}")
 
