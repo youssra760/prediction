@@ -1,36 +1,29 @@
-name: Prédiction quotidienne -> CSV sur Drive
+name: Prédiction quotidienne -> Google Drive
 
 on:
   schedule:
-    - cron: '0 5 * * *'  # 6h00 à Fès (UTC+1)
+    - cron: '0 5 * * *'  # Tous les jours à 6h heure Maroc (UTC+1)
   workflow_dispatch:
 
 jobs:
-  predict:
+  run_prediction:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
 
-      - uses: actions/setup-python@v4
+      - name: Setup Python
+        uses: actions/setup-python@v4
         with:
-          python-version: '3.10'
+          python-version: "3.10"
 
       - name: Installer dépendances
         run: |
-          pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install --upgrade pip
+          pip install pandas scikit-learn google-auth google-auth-oauthlib google-auth-httplib2 google-api-python-client openpyxl
 
       - name: Exécuter le script de prédiction
         env:
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           REFRESH_TOKEN: ${{ secrets.REFRESH_TOKEN }}
-          EXCEL_FILE_ID: ${{ secrets.EXCEL_FILE_ID }}
-          FOLDER_ID: ${{ secrets.FOLDER_ID }}
-
-          # Variables email pour envoi
-          SENDER_EMAIL: ${{ secrets.SENDER_EMAIL }}
-          SENDER_PASSWORD: ${{ secrets.SENDER_PASSWORD }}
-          RECEIVER_EMAIL: ${{ secrets.RECEIVER_EMAIL }}
-
         run: python prediction.py
