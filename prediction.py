@@ -4,8 +4,11 @@ from sklearn.linear_model import LinearRegression
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 import numpy as np
-import smtplib
-from email.message import EmailMessage
+
+from google.auth.transport.requests import Request
+from google.oauth2.credentials import Credentials
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
 def train_model_for_symbol(df_symbol):
     cols = ['open', 'high', 'low', 'close', 'volume']
@@ -65,24 +68,34 @@ def train_model_for_symbol(df_symbol):
 
     return results
 
-def send_email_with_attachment(sender_email, sender_password, receiver_email, subject, body, filename):
-    msg = EmailMessage()
-    msg['From'] = sender_email
-    msg['To'] = receiver_email
-    msg['Subject'] = subject
-    msg.set_content(body)
+def upload_to_drive(filename, folder_id, creds):
+    service = build("drive", "v3", credentials=creds)
 
-    with open(filename, 'rb') as f:
-        file_data = f.read()
-        file_name = f.name
+    # Chercher fichier avec ce nom dans le dossier
+    query = f"name='{filename}' and '{folder_id}' in parents and trashed=false"
+    results = service.files().list(q=query, fields="files(id, name)").execute()
+    items = results.get('files', [])
 
-    msg.add_attachment(file_data, maintype='application', subtype='vnd.openxmlformats-officedocument.spreadsheetml.sheet', filename=file_name)
+    media = MediaFileUpload(filename, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
 
-    with smtplib.SMTP_SSL('smtp.gmail.com', 465) as smtp:
-        smtp.login(sender_email, sender_password)
-        smtp.send_message(msg)
-
-    print(f"Email envoyé à {receiver_email} avec la pièce jointe {filename}")
+    if items:
+        file_id = items[0]['id']
+        updated_file = service.files().update(
+            fileId=file_id,
+            media_body=media
+        ).execute()
+        print(f"Fichier mis à jour sur Google Drive (ID: {file_id})")
+    else:
+        file_metadata = {
+            "name": filename,
+            "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "parents": [folder_id]
+        }
+        uploaded_file = service.files().create(
+            body=file_metadata,
+            media_body=media
+        ).execute()
+        print(f"Nouveau fichier créé sur Google Drive dans le dossier (ID: {uploaded_file.get('id')})")
 
 def main():
     url = "https://docs.google.com/spreadsheets/d/18HmHLnT3fQrrV22zs_0bAym_VQZfG8zg/export?format=csv&gid=1356640539"
@@ -100,21 +113,24 @@ def main():
     all_results.to_excel(filename, index=False)
     print(f"Résultats sauvegardés dans {filename}")
 
-    # Récupération des variables d'environnement
-    sender_email = os.getenv('SENDER_EMAIL')
-    sender_password = os.getenv('SENDER_PASSWORD')
-    receiver_email = os.getenv('RECEIVER_EMAIL')
+    CLIENT_ID = os.getenv('CLIENT_ID')
+    CLIENT_SECRET = os.getenv('CLIENT_SECRET')
+    REFRESH_TOKEN = os.getenv('REFRESH_TOKEN')
+    FOLDER_ID = os.getenv('FOLDER_ID')
 
-    print(f"SENDER_EMAIL : {sender_email}")
-    print(f"SENDER_PASSWORD : {'[secret]' if sender_password else None}")
-    print(f"RECEIVER_EMAIL : {receiver_email}")
+    creds = Credentials(
+        None,
+        refresh_token=REFRESH_TOKEN,
+        client_id=CLIENT_ID,
+        client_secret=CLIENT_SECRET,
+        token_uri="https://oauth2.googleapis.com/token"
+    )
 
-    if sender_email and sender_password and receiver_email:
-        subject = 'Résultats des prédictions'
-        body = 'Bonjour,\n\nVeuillez trouver en pièce jointe le fichier Excel contenant les résultats des prédictions.\n\nCordialement.'
-        send_email_with_attachment(sender_email, sender_password, receiver_email, subject, body, filename)
-    else:
-        print("Une ou plusieurs variables d'environnement pour l'email sont manquantes. Email non envoyé.")
+    if creds and creds.expired and creds.refresh_token:
+        creds.refresh(Request())
+
+    upload_to_drive(filename, FOLDER_ID, creds)
 
 if __name__ == "__main__":
     main()
+
