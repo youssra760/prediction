@@ -5,14 +5,12 @@ from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from googleapiclient.http import MediaIoBaseUpload, MediaIoBaseDownload
 
-# 🔑 Lire les secrets depuis GitHub Actions
 CLIENT_ID = os.getenv("CLIENT_ID")
 CLIENT_SECRET = os.getenv("CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("REFRESH_TOKEN")
-EXCEL_FILE_ID = os.getenv("EXCEL_FILE_ID")  # ID de ta Google Sheet
-FOLDER_ID = os.getenv("FOLDER_ID")          # ID du dossier Drive cible
+EXCEL_FILE_ID = os.getenv("EXCEL_FILE_ID")
+FOLDER_ID = os.getenv("FOLDER_ID")
 
-# 1. Obtenir un access token via refresh token
 resp = requests.post(
     "https://oauth2.googleapis.com/token",
     data={
@@ -26,11 +24,9 @@ resp.raise_for_status()
 creds = Credentials(token=resp.json()["access_token"])
 service = build("drive", "v3", credentials=creds)
 
-# 2. Télécharger la Google Sheet depuis Drive
 request = service.files().export_media(
     fileId=EXCEL_FILE_ID,
-    mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    supportsAllDrives=True
+    mimeType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
 fh = io.BytesIO()
 downloader = MediaIoBaseDownload(fh, request)
@@ -39,34 +35,23 @@ while not done:
     _, done = downloader.next_chunk()
 fh.seek(0)
 
-# 3. Lire les données avec pandas
 df = pd.read_excel(fh).dropna()
 X = df[['Open', 'High', 'Low', 'Close', 'Volume']]
 y = df['Close_tmr']
-
-# 4. Entraîner le modèle et faire la prédiction
 model = LinearRegression().fit(X, y)
 pred_value = float(model.predict(X.iloc[-1].values.reshape(1, -1))[0])
 
-# 5. Générer un fichier CSV avec date + prédiction
 csv_filename = "prediction.csv"
-pd.DataFrame([{
-    'date': pd.Timestamp.today().date().isoformat(),
-    'prediction_close': pred_value
-}]).to_csv(csv_filename, index=False)
-print(f"✔️ Fichier CSV généré : {csv_filename}")
+pd.DataFrame([{'date': pd.Timestamp.today().date().isoformat(),
+               'prediction_close': pred_value}]).to_csv(csv_filename, index=False)
+print("✔ CSV généré :", csv_filename)
 
-# 6. Uploader le CSV dans ton dossier Google Drive cible
-file_metadata = {
-    'name': csv_filename,
-    'parents': [FOLDER_ID],
-    'mimeType': 'text/csv'
-}
+file_metadata = {'name': csv_filename, 'parents': [FOLDER_ID], 'mimeType': 'text/csv'}
 media = MediaIoBaseUpload(open(csv_filename, 'rb'), mimetype='text/csv')
 uploaded = service.files().create(
     body=file_metadata,
     media_body=media,
-    supportsAllDrives=True,
-    fields="id"
+    fields="id",
+    supportsAllDrives=True
 ).execute()
-print("✅ Upload réussi, file ID:", uploaded.get("id"))
+print("✅ Upload réussi ID:", uploaded.get("id"))
