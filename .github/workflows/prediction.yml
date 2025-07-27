@@ -2,7 +2,7 @@ name: Prédiction quotidienne -> Google Drive
 
 on:
   schedule:
-    - cron: '0 5 * * *'  # Tous les jours à 6h heure Maroc (UTC+1)
+    - cron: '0 4 * * *'  # Tous les jours à 5h heure Maroc (UTC+1)
   workflow_dispatch:
 
 jobs:
