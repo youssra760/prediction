@@ -10,6 +10,7 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
+
 def train_model_for_symbol(df_symbol):
     cols = ['open', 'high', 'low', 'close', 'volume']
     for col in cols:
@@ -56,19 +57,22 @@ def train_model_for_symbol(df_symbol):
     next_day_pred = model.predict(next_day_features)
     print(f"\nPrédiction close pour le jour suivant : {next_day_pred[0]:.2f}\n")
 
+    # Résultats avec date
     results = pd.DataFrame({
+        'Date': df_symbol.iloc[y_test.index]['date'].values,
         'Actual': y_test.values,
-        'Predicted': y_pred
+        'Predicted': y_pred,
+        'Symbol': df_symbol['symbol'].iloc[0],
+        'MAE': mae,
+        'MSE': mse,
+        'RMSE': rmse,
+        'R2': r2
     })
-    results['Symbol'] = df_symbol['symbol'].iloc[0]
-    results['MAE'] = mae
-    results['MSE'] = mse
-    results['RMSE'] = rmse
-    results['R2'] = r2
 
-    # Ajout de la prédiction du jour suivant
+    # Ligne de prédiction du jour suivant
     next_day = pd.to_datetime(df_symbol['date'].max()) + pd.Timedelta(days=1)
     next_day_row = pd.DataFrame({
+        'Date': [str(next_day.date())],
         'Actual': [np.nan],
         'Predicted': [next_day_pred[0]],
         'Symbol': [df_symbol['symbol'].iloc[0]],
@@ -76,16 +80,17 @@ def train_model_for_symbol(df_symbol):
         'MSE': [mse],
         'RMSE': [rmse],
         'R2': [r2]
-    }, index=[str(next_day.date())])
+    })
 
-    results = pd.concat([results, next_day_row])
+    results = pd.concat([results, next_day_row], ignore_index=True)
 
     return results
+
 
 def upload_to_drive(filename, creds):
     service = build("drive", "v3", credentials=creds)
 
-    # Recherche fichier avec ce nom à la racine (sans dossier)
+    # Recherche fichier existant à la racine
     query = f"name='{filename}' and trashed=false"
     results = service.files().list(q=query, fields="files(id, name)").execute()
     items = results.get('files', [])
@@ -94,24 +99,19 @@ def upload_to_drive(filename, creds):
 
     if items:
         file_id = items[0]['id']
-        service.files().update(
-            fileId=file_id,
-            media_body=media
-        ).execute()
+        service.files().update(fileId=file_id, media_body=media).execute()
         print(f"Fichier mis à jour sur Google Drive (ID: {file_id})")
     else:
         file_metadata = {
             "name": filename,
             "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         }
-        uploaded_file = service.files().create(
-            body=file_metadata,
-            media_body=media
-        ).execute()
+        uploaded_file = service.files().create(body=file_metadata, media_body=media).execute()
         print(f"Nouveau fichier créé sur Google Drive (ID: {uploaded_file.get('id')})")
 
+
 def main():
-    # Lien export CSV de ta Google Sheet
+    # URL de l'export CSV Google Sheets
     url = "https://docs.google.com/spreadsheets/d/1zet2MRDEotTpDpW5zPCaXHoljBTSKUYDnx7ICNXsHEI/export?format=csv&gid=990018493"
     df = pd.read_csv(url)
 
@@ -127,6 +127,7 @@ def main():
     all_results.to_excel(filename, index=False)
     print(f"Résultats sauvegardés dans {filename}")
 
+    # Authentification OAuth 2.0
     CLIENT_ID = os.getenv('CLIENT_ID')
     CLIENT_SECRET = os.getenv('CLIENT_SECRET')
     REFRESH_TOKEN = os.getenv('REFRESH_TOKEN')
@@ -143,6 +144,7 @@ def main():
         creds.refresh(Request())
 
     upload_to_drive(filename, creds)
+
 
 if __name__ == "__main__":
     main()
