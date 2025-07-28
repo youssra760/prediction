@@ -57,9 +57,9 @@ def train_model_for_symbol(df_symbol):
     next_day_pred = model.predict(next_day_features)
     print(f"\nPrédiction close pour le jour suivant : {next_day_pred[0]:.2f}\n")
 
-    # Résultats avec date
+    # Résultats avec date (corrigé avec loc)
     results = pd.DataFrame({
-        'Date': df_symbol.iloc[y_test.index]['date'].values,
+        'Date': df_symbol.loc[y_test.index, 'date'].values,
         'Actual': y_test.values,
         'Predicted': y_pred,
         'Symbol': df_symbol['symbol'].iloc[0],
